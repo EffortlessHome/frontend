@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>Home Assistant</title>
+    <title>Oasira</title>
     <%= renderTemplate("_header.html.template") %>
     <%= renderTemplate("_style_base.html.template") %>
     <style>
@@ -45,8 +45,8 @@
   </head>
   <body>
     <div class="content">
-      <div class="header">
-        <img src="/static/icons/favicon-192x192.png" alt="Home Assistant" />
+      <div align="center">
+        <img src="/static/icons/oasiralogo.png" alt="Oasira" height="100" />
       </div>
       <ha-authorize></ha-authorize>
     </div>

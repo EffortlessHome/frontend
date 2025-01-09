@@ -207,7 +207,7 @@ export class HaAuthorize extends litLocalizeLiteMixin(LitElement) {
           inline-arrow
         ></ha-language-picker>
         <a
-          href="https://www.home-assistant.io/docs/authentication/"
+          href="https://www.effortlesshome.co/register/"
           target="_blank"
           rel="noreferrer noopener"
           >${this.localize("ui.panel.page-authorize.help")}</a
