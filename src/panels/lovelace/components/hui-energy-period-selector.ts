@@ -20,7 +20,7 @@ import {
   subDays,
 } from "date-fns";
 import type { UnsubscribeFunc } from "home-assistant-js-websocket";
-import type { CSSResultGroup, PropertyValues } from "lit";
+import type { PropertyValues } from "lit";
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators";
 import memoizeOne from "memoize-one";
@@ -246,8 +246,7 @@ export class HuiEnergyPeriodSelector extends SubscribeMixin(LitElement) {
             .startDate=${this._startDate}
             .endDate=${this._endDate || new Date()}
             .ranges=${this._ranges}
-            @change=${this._dateRangeChanged}
-            time-picker
+            @value-changed=${this._dateRangeChanged}
             minimal
           ></ha-date-range-picker>
         </div>
@@ -347,7 +346,7 @@ export class HuiEnergyPeriodSelector extends SubscribeMixin(LitElement) {
   private _dateRangeChanged(ev) {
     const weekStartsOn = firstWeekdayIndex(this.hass.locale);
     this._startDate = calcDate(
-      ev.detail.startDate,
+      ev.detail.value.startDate,
       startOfDay,
       this.hass.locale,
       this.hass.config,
@@ -356,7 +355,7 @@ export class HuiEnergyPeriodSelector extends SubscribeMixin(LitElement) {
       }
     );
     this._endDate = calcDate(
-      ev.detail.endDate,
+      ev.detail.value.endDate,
       endOfDay,
       this.hass.locale,
       this.hass.config,
@@ -541,50 +540,48 @@ export class HuiEnergyPeriodSelector extends SubscribeMixin(LitElement) {
     energyCollection.refresh();
   }
 
-  static get styles(): CSSResultGroup {
-    return css`
-      .row {
-        display: flex;
-        align-items: center;
-      }
-      :host .time-handle {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-      }
-      :host([narrow]) .time-handle {
-        margin-left: auto;
-        margin-inline-start: auto;
-        margin-inline-end: initial;
-      }
-      .label {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        font-size: 20px;
-        margin-left: auto;
-        margin-inline-start: auto;
-        margin-inline-end: initial;
-      }
-      :host([narrow]) .label {
-        margin-left: unset;
-        margin-inline-start: unset;
-        margin-inline-end: initial;
-      }
-      mwc-button {
-        margin-left: 8px;
-        margin-inline-start: 8px;
-        margin-inline-end: initial;
-        flex-shrink: 0;
-        --mdc-button-outline-color: currentColor;
-        --primary-color: currentColor;
-        --mdc-theme-primary: currentColor;
-        --mdc-theme-on-primary: currentColor;
-        --mdc-button-disabled-outline-color: var(--disabled-text-color);
-        --mdc-button-disabled-ink-color: var(--disabled-text-color);
-      }
-    `;
-  }
+  static styles = css`
+    .row {
+      display: flex;
+      align-items: center;
+    }
+    :host .time-handle {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+    :host([narrow]) .time-handle {
+      margin-left: auto;
+      margin-inline-start: auto;
+      margin-inline-end: initial;
+    }
+    .label {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      font-size: 20px;
+      margin-left: auto;
+      margin-inline-start: auto;
+      margin-inline-end: initial;
+    }
+    :host([narrow]) .label {
+      margin-left: unset;
+      margin-inline-start: unset;
+      margin-inline-end: initial;
+    }
+    mwc-button {
+      margin-left: 8px;
+      margin-inline-start: 8px;
+      margin-inline-end: initial;
+      flex-shrink: 0;
+      --mdc-button-outline-color: currentColor;
+      --primary-color: currentColor;
+      --mdc-theme-primary: currentColor;
+      --mdc-theme-on-primary: currentColor;
+      --mdc-button-disabled-outline-color: var(--disabled-text-color);
+      --mdc-button-disabled-ink-color: var(--disabled-text-color);
+    }
+  `;
 }
 
 declare global {

@@ -1,6 +1,8 @@
+import { memoize } from "@fullcalendar/core/internal";
 import { setHours, setMinutes } from "date-fns";
 import type { HassConfig } from "home-assistant-js-websocket";
 import memoizeOne from "memoize-one";
+import checkValidDate from "../common/datetime/check_valid_date";
 import {
   formatDateTime,
   formatDateTimeNumeric,
@@ -12,21 +14,32 @@ import { fileDownload } from "../util/file_download";
 import { domainToName } from "./integration";
 import type { FrontendLocaleData } from "./translation";
 
-export const enum BackupScheduleState {
+export const enum BackupScheduleRecurrence {
   NEVER = "never",
   DAILY = "daily",
-  MONDAY = "mon",
-  TUESDAY = "tue",
-  WEDNESDAY = "wed",
-  THURSDAY = "thu",
-  FRIDAY = "fri",
-  SATURDAY = "sat",
-  SUNDAY = "sun",
+  CUSTOM_DAYS = "custom_days",
 }
+
+export type BackupDay = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+export const BACKUP_DAYS: BackupDay[] = [
+  "mon",
+  "tue",
+  "wed",
+  "thu",
+  "fri",
+  "sat",
+  "sun",
+];
+
+export const sortWeekdays = (weekdays) =>
+  weekdays.sort((a, b) => BACKUP_DAYS.indexOf(a) - BACKUP_DAYS.indexOf(b));
 
 export interface BackupConfig {
   last_attempted_automatic_backup: string | null;
   last_completed_automatic_backup: string | null;
+  next_automatic_backup: string | null;
+  next_automatic_backup_additional?: boolean;
   create_backup: {
     agent_ids: string[];
     include_addons: string[] | null;
@@ -41,8 +54,11 @@ export interface BackupConfig {
     days?: number | null;
   };
   schedule: {
-    state: BackupScheduleState;
+    recurrence: BackupScheduleRecurrence;
+    time?: string | null;
+    days: BackupDay[];
   };
+  agents: BackupAgentsConfig;
 }
 
 export interface BackupMutableConfig {
@@ -59,21 +75,39 @@ export interface BackupMutableConfig {
     copies?: number | null;
     days?: number | null;
   };
-  schedule?: BackupScheduleState;
+  schedule?: {
+    recurrence: BackupScheduleRecurrence;
+    time?: string | null;
+    days?: BackupDay[] | null;
+  };
+  agents?: BackupAgentsConfig;
+}
+
+export type BackupAgentsConfig = Record<string, BackupAgentConfig>;
+
+export interface BackupAgentConfig {
+  protected: boolean;
 }
 
 export interface BackupAgent {
   agent_id: string;
+  name: string;
+}
+
+export interface BackupContentAgent {
+  size: number;
+  protected: boolean;
 }
 
 export interface BackupContent {
   backup_id: string;
   date: string;
   name: string;
-  protected: boolean;
-  size: number;
-  agent_ids?: string[];
+  agents: Record<string, BackupContentAgent>;
   failed_agent_ids?: string[];
+  extra_metadata?: {
+    "supervisor.addon_update"?: string;
+  };
   with_automatic_settings: boolean;
 }
 
@@ -106,7 +140,7 @@ export interface BackupAgentsInfo {
   agents: BackupAgent[];
 }
 
-export type GenerateBackupParams = {
+export interface GenerateBackupParams {
   agent_ids: string[];
   include_addons?: string[];
   include_all_addons?: boolean;
@@ -115,9 +149,9 @@ export type GenerateBackupParams = {
   include_homeassistant?: boolean;
   name?: string;
   password?: string;
-};
+}
 
-export type RestoreBackupParams = {
+export interface RestoreBackupParams {
   backup_id: string;
   agent_id: string;
   password?: string;
@@ -125,7 +159,7 @@ export type RestoreBackupParams = {
   restore_database?: boolean;
   restore_folders?: string[];
   restore_homeassistant?: boolean;
-};
+}
 
 export const fetchBackupConfig = (hass: HomeAssistant) =>
   hass.callWS<{ config: BackupConfig }>({ type: "backup/config/info" });
@@ -135,8 +169,12 @@ export const updateBackupConfig = (
   config: BackupMutableConfig
 ) => hass.callWS({ type: "backup/config/update", ...config });
 
-export const getBackupDownloadUrl = (id: string, agentId: string) =>
-  `/api/backup/download/${id}?agent_id=${agentId}`;
+export const getBackupDownloadUrl = (
+  id: string,
+  agentId: string,
+  password?: string | null
+) =>
+  `/api/backup/download/${id}?agent_id=${agentId}${password ? `&password=${password}` : ""}`;
 
 export const fetchBackupInfo = (hass: HomeAssistant): Promise<BackupInfo> =>
   hass.callWS({
@@ -229,6 +267,19 @@ export const getPreferredAgentForDownload = (agents: string[]) => {
   return agents[0];
 };
 
+export const canDecryptBackupOnDownload = (
+  hass: HomeAssistant,
+  backup_id: string,
+  agent_id: string,
+  password: string
+) =>
+  hass.callWS({
+    type: "backup/can_decrypt_on_download",
+    backup_id,
+    agent_id,
+    password,
+  });
+
 export const CORE_LOCAL_AGENT = "backup.local";
 export const HASSIO_LOCAL_AGENT = "hassio.local";
 export const CLOUD_AGENT = "cloud.cloud";
@@ -244,13 +295,18 @@ export const isNetworkMountAgent = (agentId: string) => {
 export const computeBackupAgentName = (
   localize: LocalizeFunc,
   agentId: string,
-  agentIds?: string[]
+  agents: BackupAgent[]
 ) => {
   if (isLocalAgent(agentId)) {
     return localize("ui.panel.config.backup.agents.local_agent");
   }
-  const [domain, name] = agentId.split(".");
 
+  const agent = agents.find((a) => a.agent_id === agentId);
+
+  const domain = agentId.split(".")[0];
+  const name = agent ? agent.name : agentId.split(".")[1];
+
+  // If it's a network mount agent, only show the name
   if (isNetworkMountAgent(agentId)) {
     return name;
   }
@@ -258,11 +314,36 @@ export const computeBackupAgentName = (
   const domainName = domainToName(localize, domain);
 
   // If there are multiple agents for a domain, show the name
-  const showName = agentIds
-    ? agentIds.filter((a) => a.split(".")[0] === domain).length > 1
-    : true;
+  const showName =
+    agents.filter((a) => a.agent_id.split(".")[0] === domain).length > 1;
 
   return showName ? `${domainName}: ${name}` : domainName;
+};
+
+export const computeBackupSize = (backup: BackupContent) =>
+  Math.max(...Object.values(backup.agents).map((agent) => agent.size));
+
+export type BackupType = "automatic" | "manual" | "addon_update";
+
+const BACKUP_TYPE_ORDER: BackupType[] = ["automatic", "manual", "addon_update"];
+
+export const getBackupTypes = memoize((isHassio: boolean) =>
+  isHassio
+    ? BACKUP_TYPE_ORDER
+    : BACKUP_TYPE_ORDER.filter((type) => type !== "addon_update")
+);
+
+export const computeBackupType = (
+  backup: BackupContent,
+  isHassio: boolean
+): BackupType => {
+  if (backup.with_automatic_settings) {
+    return "automatic";
+  }
+  if (isHassio && backup.extra_metadata?.["supervisor.addon_update"] != null) {
+    return "addon_update";
+  }
+  return "manual";
 };
 
 export const compareAgents = (a: string, b: string) => {
@@ -337,9 +418,34 @@ export const downloadEmergencyKit = (
     geneateEmergencyKitFileName(hass, appendFileName)
   );
 
+export const DEFAULT_OPTIMIZED_BACKUP_START_TIME = setMinutes(
+  setHours(new Date(), 4),
+  45
+);
+
+export const DEFAULT_OPTIMIZED_BACKUP_END_TIME = setMinutes(
+  setHours(new Date(), 5),
+  45
+);
+
 export const getFormattedBackupTime = memoizeOne(
-  (locale: FrontendLocaleData, config: HassConfig) => {
-    const date = setMinutes(setHours(new Date(), 4), 45);
-    return formatTime(date, locale, config);
+  (
+    locale: FrontendLocaleData,
+    config: HassConfig,
+    backupTime?: Date | string | null
+  ) => {
+    if (checkValidDate(backupTime as Date)) {
+      return formatTime(backupTime as Date, locale, config);
+    }
+    if (typeof backupTime === "string" && backupTime) {
+      const splitted = backupTime.split(":");
+      const date = setMinutes(
+        setHours(new Date(), parseInt(splitted[0])),
+        parseInt(splitted[1])
+      );
+      return formatTime(date, locale, config);
+    }
+
+    return `${formatTime(DEFAULT_OPTIMIZED_BACKUP_START_TIME, locale, config)} - ${formatTime(DEFAULT_OPTIMIZED_BACKUP_END_TIME, locale, config)}`;
   }
 );

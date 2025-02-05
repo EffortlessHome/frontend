@@ -144,11 +144,11 @@ export class HaConfigDevicePage extends LitElement {
       entries: ConfigEntry[],
       manifests: IntegrationManifest[]
     ): ConfigEntry[] => {
-      const entryLookup: { [entryId: string]: ConfigEntry } = {};
+      const entryLookup: Record<string, ConfigEntry> = {};
       for (const entry of entries) {
         entryLookup[entry.entry_id] = entry;
       }
-      const manifestLookup: { [domain: string]: IntegrationManifest } = {};
+      const manifestLookup: Record<string, IntegrationManifest> = {};
       for (const manifest of manifests) {
         manifestLookup[manifest.domain] = manifest;
       }
@@ -1073,7 +1073,14 @@ export class HaConfigDevicePage extends LitElement {
       (ent) => computeDomain(ent.entity_id) === "assist_satellite"
     );
 
+    const domains = this._integrations(
+      device,
+      this.entries,
+      this.manifests
+    ).map((int) => int.domain);
+
     if (
+      !domains.includes("voip") &&
       assistSatellite &&
       assistSatelliteSupportsSetupFlow(
         this.hass.states[assistSatellite.entity_id]
@@ -1087,12 +1094,6 @@ export class HaConfigDevicePage extends LitElement {
         icon: mdiMicrophone,
       });
     }
-
-    const domains = this._integrations(
-      device,
-      this.entries,
-      this.manifests
-    ).map((int) => int.domain);
 
     if (domains.includes("mqtt")) {
       const mqtt = await import(

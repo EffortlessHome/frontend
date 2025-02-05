@@ -9,9 +9,9 @@ import "../../../../../components/ha-icon-next";
 import "../../../../../components/ha-md-list";
 import "../../../../../components/ha-md-list-item";
 import "../../../../../components/ha-svg-icon";
-import type { BackupConfig } from "../../../../../data/backup";
+import type { BackupAgent, BackupConfig } from "../../../../../data/backup";
 import {
-  BackupScheduleState,
+  BackupScheduleRecurrence,
   computeBackupAgentName,
   getFormattedBackupTime,
   isLocalAgent,
@@ -25,30 +25,95 @@ class HaBackupBackupsSummary extends LitElement {
 
   @property({ attribute: false }) public config!: BackupConfig;
 
+  @property({ attribute: false }) public agents!: BackupAgent[];
+
   private _configure() {
     navigate("/config/backup/settings");
   }
 
   private _scheduleDescription(config: BackupConfig): string {
     const { copies, days } = config.retention;
-    const { state: schedule } = config.schedule;
+    const { recurrence } = config.schedule;
 
-    if (schedule === BackupScheduleState.NEVER) {
+    if (recurrence === BackupScheduleRecurrence.NEVER) {
       return this.hass.localize(
         "ui.panel.config.backup.overview.settings.schedule_never"
       );
     }
 
-    const time = getFormattedBackupTime(this.hass.locale, this.hass.config);
+    const time: string | undefined | null =
+      this.config.schedule.time &&
+      getFormattedBackupTime(
+        this.hass.locale,
+        this.hass.config,
+        this.config.schedule.time
+      );
 
-    const scheduleText = this.hass.localize(
-      `ui.panel.config.backup.overview.settings.schedule_${schedule}`,
-      { time }
+    let scheduleText = this.hass.localize(
+      "ui.panel.config.backup.overview.settings.schedule_never"
     );
 
+    const configDays = this.config.schedule.days;
+
+    if (
+      this.config.schedule.recurrence === BackupScheduleRecurrence.DAILY ||
+      (this.config.schedule.recurrence ===
+        BackupScheduleRecurrence.CUSTOM_DAYS &&
+        configDays.length === 7)
+    ) {
+      scheduleText = this.hass.localize(
+        `ui.panel.config.backup.overview.settings.schedule_${!this.config.schedule.time ? "optimized_" : ""}daily`,
+        {
+          time,
+        }
+      );
+    } else if (
+      this.config.schedule.recurrence ===
+        BackupScheduleRecurrence.CUSTOM_DAYS &&
+      configDays.length !== 0
+    ) {
+      if (
+        configDays.length === 2 &&
+        configDays.includes("sat") &&
+        configDays.includes("sun")
+      ) {
+        scheduleText = this.hass.localize(
+          `ui.panel.config.backup.overview.settings.schedule_${!this.config.schedule.time ? "optimized_" : ""}weekend`,
+          {
+            time,
+          }
+        );
+      } else if (
+        configDays.length === 5 &&
+        !configDays.includes("sat") &&
+        !configDays.includes("sun")
+      ) {
+        scheduleText = this.hass.localize(
+          `ui.panel.config.backup.overview.settings.schedule_${!this.config.schedule.time ? "optimized_" : ""}weekdays`,
+          {
+            time,
+          }
+        );
+      } else {
+        scheduleText = this.hass.localize(
+          `ui.panel.config.backup.overview.settings.schedule_${!this.config.schedule.time ? "optimized_" : ""}days`,
+          {
+            count: configDays.length,
+            days: configDays
+              .map((dayCode) =>
+                this.hass.localize(
+                  `ui.panel.config.backup.overview.settings.${configDays.length > 2 ? "short_weekdays" : "weekdays"}.${dayCode}`
+                )
+              )
+              .join(", "),
+            time,
+          }
+        );
+      }
+    }
+
     let copiesText = this.hass.localize(
-      `ui.panel.config.backup.overview.settings.schedule_copies_all`,
-      { time }
+      `ui.panel.config.backup.overview.settings.schedule_copies_all`
     );
     if (copies) {
       copiesText = this.hass.localize(
@@ -97,7 +162,7 @@ class HaBackupBackupsSummary extends LitElement {
         const name = computeBackupAgentName(
           this.hass.localize,
           offsiteLocations[0],
-          offsiteLocations
+          this.agents
         );
         return this.hass.localize(
           "ui.panel.config.backup.overview.settings.locations_one",
